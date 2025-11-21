@@ -1,0 +1,29 @@
+# FastAPI Framework
+fastapi
+uvicorn[standard]
+python-multipart
+
+# Pydantic for data validation
+pydantic
+pydantic-settings
+email-validator
+
+# OpenAI for embeddings and LLM
+openai
+
+# Vector Database - Qdrant
+qdrant-client
+
+# Redis for conversation memory
+redis
+
+# MongoDB for metadata storage
+motor
+pymongo
+
+# Document processing
+PyMuPDF
+python-docx
+
+# Utilities
+python-dotenv
