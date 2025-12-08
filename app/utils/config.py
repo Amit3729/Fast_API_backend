@@ -5,8 +5,6 @@ from typing import Optional
 class Settings(BaseSettings):
     """Application configuration settings"""
     
-    # OpenAI
-    OPENAI_API_KEY: str = Field(..., description="OpenAI API key for embeddings and LLM")
     # Groq (free & super fast LLM)
     GROQ_API_KEY: str = Field(..., description="Groq API key — get free at https://console.groq.com/keys")
     

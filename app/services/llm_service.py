@@ -1,6 +1,3 @@
-# app/services/llm_service.py
-# → GROQ VERSION (FREE, FAST, NO QUOTA DRAMA)
-
 import httpx
 import json
 from typing import Dict, Any
@@ -17,7 +14,7 @@ class LLMService:
         self.url = "https://api.groq.com/openai/v1/chat/completions"
         self.api_key = settings.GROQ_API_KEY  
         self.headers = {"Authorization": f"Bearer {self.api_key}"}
-        self.model = "llama-3.1-8b-instant"  # or "mixtral-8x7b-32768"
+        self.model = "llama-3.1-8b-instant"  
 
     async def generate_answer(self, prompt: str, max_tokens: int = 500) -> str:
         payload = {

@@ -155,46 +155,6 @@ def search_similar(
         logger.error(f"Qdrant search failed: {e}", exc_info=True)
         raise
 
-# def search_similar(
-#     query_vector: List[float], 
-#     top_k: int = 4,
-#     score_threshold: float = 0.0
-# ) -> List[Dict[str, Any]]:
-#     """
-#     Search for similar vectors in Qdrant.
-    
-#     Args:
-#         query_vector: Query embedding vector
-#         top_k: Number of results to return
-#         score_threshold: Minimum similarity score (0.0 to 1.0)
-        
-#     Returns:
-#         List of dicts with id, score, text, and metadata
-#     """
-#     try:
-#         hits = client.search(
-#             collection_name=COLLECTION_NAME,
-#             query_vector=query_vector,
-#             limit=top_k,
-#             score_threshold=score_threshold
-#         )
-        
-#         results = []
-#         for hit in hits:
-#             result = {
-#                 "id": hit.id,
-#                 "score": hit.score,
-#                 "text": hit.payload.get("text") if hit.payload else None,
-#                 "meta": {k: v for k, v in (hit.payload or {}).items() if k != "text"}
-#             }
-#             results.append(result)
-        
-#         logger.info(f"Found {len(results)} similar vectors")
-#         return results
-        
-#     except Exception as e:
-#         logger.error(f"Error searching vectors in Qdrant: {str(e)}")
-#         raise
 
 def delete_by_source(source: str) -> int:
     """

@@ -15,7 +15,7 @@ class BookingService:
     def __init__(self):
         self.url = "https://api.groq.com/openai/v1/chat/completions"
         self.headers = {"Authorization": f"Bearer {settings.GROQ_API_KEY}"}
-        self.model = "llama-3.1-8b-instant"  # Fast & free
+        self.model = "llama-3.1-8b-instant"  
 
     async def extract_booking_info(self, query: str, conversation_history: List[Dict[str, str]]) -> Dict[str, Any]:
         history_text = "\n".join([f"{m['role']}: {m['text']}" for m in conversation_history[-6:]])
@@ -111,8 +111,6 @@ Rules:
         except Exception as e:
             logger.error(f"MongoDB save failed: {e}")
             raise
-
-    # get_bookings, get_booking_by_id, delete_booking → keep your existing ones
     
     async def get_bookings(
         self, 

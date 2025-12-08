@@ -1,17 +1,15 @@
-# app/services/embeddings.py
-
 from typing import List
 import numpy as np
 from app.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
-# === FREE LOCAL EMBEDDINGS (As openai have limit and take charges on later on) ===
+#FREE LOCAL EMBEDDINGS (As openai have limit and take charges on later on)
 try:
     from sentence_transformers import SentenceTransformer
     
-    # Best balance: fast + high quality + small size
-    _model = SentenceTransformer("all-MiniLM-L6-v2", device="cpu")  # works on Mac/Windows/Linux
+    
+    _model = SentenceTransformer("all-MiniLM-L6-v2", device="cpu")  
     EMBEDDING_DIM = 384
     logger.info("Local embedding model loaded: all-MiniLM-L6-v2 (384-dim, 100% free & private)")
 
