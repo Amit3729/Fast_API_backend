@@ -2,6 +2,11 @@ from pydantic import BaseModel, EmailStr, Field, field_validator
 from typing import List, Optional
 from datetime import datetime
 
+# ← ADD THIS CLASS (you already have it in rag.py, but it must be here too)
+class SourceInfo(BaseModel):
+    source: str
+    preview: str = ""
+
 class UploadResponse(BaseModel):
     message: str
     file_type: str
@@ -11,9 +16,10 @@ class AskRequest(BaseModel):
     session_id: Optional[str] = Field(default="anonymous", description="Session identifier for conversation")
     query: str = Field(..., min_length=1, description="User query")
 
+# ← THIS IS THE ONLY CHANGE YOU NEED
 class AskResponse(BaseModel):
     answer: str
-    sources: List[str]
+    sources: List[SourceInfo] = []        
     session_id: str
     booking_detected: bool = False
     booking_data: Optional[dict] = None

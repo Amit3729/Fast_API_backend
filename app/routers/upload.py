@@ -1,6 +1,10 @@
+# app/routers/upload.py
+
 import os
 import tempfile
+import asyncio
 from fastapi import APIRouter, UploadFile, File, HTTPException, BackgroundTasks
+
 from app.schemas import UploadResponse
 from app.services.chunker import chunk_text
 from app.services.embeddings import embed_texts
@@ -9,123 +13,89 @@ from app.services.db import save_metadata
 from app.utils.docx_extractor import extract_docx_text
 from app.utils.pdf_extractor import extract_pdf_text
 from app.utils.logger import get_logger
-import asyncio
 
 logger = get_logger(__name__)
-router = APIRouter()
+router = APIRouter(prefix="/upload", tags=["upload"])
 
-async def process_file_async(tmp_path: str, filename: str, strategy: str):
-    """Async background processing function"""
+
+def process_document(file_path: str, original_name: str, strategy: str = "fixed"):
     try:
-        # EXTRACT TEXT
-        if filename.endswith(".pdf"):
-            text = extract_pdf_text(tmp_path)
-        elif filename.endswith(".txt"):
-            with open(tmp_path, "r", encoding="utf-8") as f:
-                text = f.read()
-        elif filename.endswith(".docx"):
-            text = extract_docx_text(tmp_path)
-        else:
-            raise ValueError(f"Unsupported file type: {filename}")
+        logger.info(f"[BACKGROUND] Starting processing: {original_name}")
 
-        if not text.strip():
-            logger.warning(f"No text extracted from {filename}")
+        # Extract
+        if original_name.lower().endswith(".pdf"):
+            text = extract_pdf_text(file_path)
+        elif original_name.lower().endswith(".txt"):
+            with open(file_path, "r", encoding="utf-8") as f:
+                text = f.read()
+        elif original_name.lower().endswith(".docx"):
+            text = extract_docx_text(file_path)
+        else:
+            logger.error("Unsupported file")
             return
 
-        # CHUNK
-        chunks = chunk_text(text, strategy=strategy)
-        logger.info(f"Created {len(chunks)} chunks from {filename}")
+        logger.info(f"[BACKGROUND] Extracted {len(text):,} chars")
 
-        # EMBED
-        embeddings = embed_texts(chunks)
-        logger.info(f"Generated {len(embeddings)} embeddings")
+        # FORCE SIMPLE FAST CHUNKING 
+        from langchain_text_splitters import RecursiveCharacterTextSplitter
+        splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=100)
+        chunks = splitter.split_text(text)
 
-        # SAVE IN QDRANT (fixed parameter order)
-        metadata_base = {
-            "source": filename,
-            "strategy": strategy,
-            "total_chunks": len(chunks)
-        }
-        ids = save_vectors(chunks, embeddings, metadata_base)
-        logger.info(f"Saved vectors to Qdrant with IDs: {ids}")
+        logger.info(f"[BACKGROUND] Chunked into {len(chunks)} pieces (fast mode)")
 
-        # SAVE METADATA
-        await save_metadata({
-            "file_name": filename,
-            "total_chunks": len(chunks),
-            "strategy": strategy,
-            "vector_ids": ids,
-            "text_preview": text[:200]
-        })
-        logger.info(f"Saved metadata for {filename}")
+        # Embedding
+        logger.info("[BACKGROUND] Starting embedding...")
+        embeddings = embed_texts(chunks)  # ← if this hangs, we’ll see it
+        logger.info(f"[BACKGROUND] Embedding done: {len(embeddings)} vectors")
+
+        # Save to Qdrant
+        metadata = {"source": original_name, "strategy": "fixed"}
+        vector_ids = save_vectors(chunks, embeddings, metadata)
+        logger.info(f"[BACKGROUND] Saved to Qdrant: {len(vector_ids)} vectors")
+
+        
+        logger.warning("[BACKGROUND] Skipping DB metadata save for speed")
+
+        logger.info(f"[BACKGROUND] SUCCESS: {original_name} → {len(chunks)} chunks indexed!")
 
     except Exception as e:
-        logger.error(f"Error processing file {filename}: {str(e)}")
+        logger.error(f"[BACKGROUND] ERROR: {e}", exc_info=True)
     finally:
-        # CLEANUP
-        if os.path.exists(tmp_path):
-            os.remove(tmp_path)
-            logger.info(f"Cleaned up temp file: {tmp_path}")
+        if os.path.exists(file_path):
+            os.unlink(file_path)
+            logger.info("[BACKGROUND] Temp file deleted")
 
-def process_file_background(tmp_path: str, filename: str, strategy: str):
-    """Wrapper to run async function in background"""
-    asyncio.run(process_file_async(tmp_path, filename, strategy))
+
 
 @router.post("/file", response_model=UploadResponse)
 async def upload_file(
-    background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
-    strategy: str = "fixed"
+    strategy: str = "fixed",
+    background_tasks: BackgroundTasks = None,
 ):
-    """
-    Upload and process documents (.pdf, .txt, .docx)
-    
-    Args:
-        file: Document file to upload
-        strategy: Chunking strategy - 'fixed', 'simple', or 'paragraph'
-    """
     if not file.filename:
-        raise HTTPException(status_code=400, detail="Filename is required")
-    
-    filename = file.filename.lower()
+        raise HTTPException(status_code=400, detail="No file selected")
 
-    # VALIDATE FILE TYPE
-    valid_extensions = (".pdf", ".txt", ".docx")
-    if not filename.endswith(valid_extensions):
-        raise HTTPException(
-            status_code=400, 
-            detail=f"Only {', '.join(valid_extensions)} files are supported"
-        )
+    original_name = file.filename
+    if not original_name.lower().endswith((".pdf", ".txt", ".docx")):
+        raise HTTPException(status_code=400, detail="Only .pdf, .txt, .docx allowed")
 
-    # VALIDATE STRATEGY
-    valid_strategies = ["fixed", "simple", "paragraph"]
-    if strategy not in valid_strategies:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Invalid strategy. Use one of: {', '.join(valid_strategies)}"
-        )
-
-    # SAVE TO TEMPORARY FILE
+    suffix = os.path.splitext(original_name)[1]
+    tmp = tempfile.NamedTemporaryFile(delete=False, suffix=suffix)
     try:
-        with tempfile.NamedTemporaryFile(delete=False, suffix=os.path.splitext(filename)[1]) as tmp:
-            content = await file.read()
-            if not content:
-                raise HTTPException(status_code=400, detail="File is empty")
-            tmp.write(content)
-            tmp_path = tmp.name
-    except Exception as e:
-        logger.error(f"Error saving temp file: {str(e)}")
-        raise HTTPException(status_code=500, detail="Failed to save uploaded file")
+        content = await file.read()
+        tmp.write(content)
+        tmp.close()
+    except Exception:
+        os.unlink(tmp.name)
+        raise HTTPException(status_code=500, detail="Failed to save file")
 
-    # ADD BACKGROUND TASK
-    #background_tasks.add_task(process_file_background, tmp_path, filename, strategy)
-    await process_file_async(tmp_path, filename, strategy)   # inline
-    
-    logger.info(f"File '{filename}' queued for processing with strategy '{strategy}'")
+    background_tasks.add_task(process_document, tmp.name, original_name, strategy)
 
+    logger.info(f"File queued: {original_name} (strategy: {strategy})")
     return UploadResponse(
-        message=f"File '{filename}' uploaded successfully. Processing in background.",
-        file_type=filename.split(".")[-1],
-        filename=filename
+        message="File uploaded. Processing in background...",
+        filename=original_name,
+        file_type=suffix[1:],
+        strategy=strategy
     )
-

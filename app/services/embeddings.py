@@ -1,71 +1,53 @@
+# app/services/embeddings.py
+
 from typing import List
-from openai import OpenAI
-from app.utils.config import settings
+import numpy as np
 from app.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
-# Initialize OpenAI client with new SDK
-client = OpenAI(api_key=settings.OPENAI_API_KEY)
-
-def embed_texts(texts: List[str], model: str = "text-embedding-3-large") -> List[List[float]]:
-    """
-    Generate embeddings for a list of texts using OpenAI API.
+# === FREE LOCAL EMBEDDINGS (As openai have limit and take charges on later on) ===
+try:
+    from sentence_transformers import SentenceTransformer
     
-    Args:
-        texts: List of text strings to embed
-        model: OpenAI embedding model to use (default: text-embedding-3-large)
-        
-    Returns:
-        List of embedding vectors (each vector is a list of floats)
-        
-    Raises:
-        ValueError: If texts list is empty
-        Exception: If API call fails
+    # Best balance: fast + high quality + small size
+    _model = SentenceTransformer("all-MiniLM-L6-v2", device="cpu")  # works on Mac/Windows/Linux
+    EMBEDDING_DIM = 384
+    logger.info("Local embedding model loaded: all-MiniLM-L6-v2 (384-dim, 100% free & private)")
+
+except ImportError as e:
+    logger.error("sentence-transformers not installed. Run: pip install sentence-transformers torch")
+    raise ImportError("Please install: pip install sentence-transformers torch") from e
+
+
+def embed_texts(texts: List[str]) -> List[List[float]]:
+    """
+    Generate embeddings using FREE local model (no OpenAI, no internet needed)
     """
     if not texts:
         logger.warning("Empty texts list provided to embed_texts")
         return []
-    
-    # Filter out empty strings
+
+    # Filter empty
     texts = [t.strip() for t in texts if t and t.strip()]
-    
     if not texts:
         logger.warning("All texts were empty after filtering")
         return []
-    
+
     try:
-        logger.info(f"Generating embeddings for {len(texts)} texts using {model}")
-        
-        response = client.embeddings.create(
-            model=model,
-            input=texts
-        )
-        
-        embeddings = [item.embedding for item in response.data]
-        
-        logger.info(f"Successfully generated {len(embeddings)} embeddings")
-        logger.debug(f"Embedding dimension: {len(embeddings[0]) if embeddings else 0}")
-        
-        return embeddings
-        
+        logger.info(f"Generating LOCAL embeddings for {len(texts)} chunks (all-MiniLM-L6-v2)")
+        embeddings = _model.encode(texts, batch_size=32, show_progress_bar=False, normalize_embeddings=True)
+        embeddings_list = embeddings.tolist()
+        logger.info(f"Generated {len(embeddings_list)} local embeddings (dim: {EMBEDDING_DIM})")
+        return embeddings_list
+
     except Exception as e:
-        logger.error(f"Error generating embeddings: {str(e)}")
+        logger.error(f"Local embedding failed: {e}", exc_info=True)
         raise
 
-def embed_single_text(text: str, model: str = "text-embedding-3-large") -> List[float]:
-    """
-    Generate embedding for a single text (convenience wrapper).
-    
-    Args:
-        text: Text string to embed
-        model: OpenAI embedding model to use
-        
-    Returns:
-        Single embedding vector
-    """
+
+def embed_single_text(text: str) -> List[float]:
+    """Convenience for single text"""
     if not text or not text.strip():
         raise ValueError("Text cannot be empty")
-    
-    embeddings = embed_texts([text], model=model)
-    return embeddings[0] if embeddings else []
+    return embed_texts([text.strip()])[0]

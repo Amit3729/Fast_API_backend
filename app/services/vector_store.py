@@ -2,6 +2,7 @@ from typing import List, Dict, Any
 from qdrant_client import QdrantClient
 from qdrant_client.http.models import PointStruct, Distance, VectorParams
 from app.utils.config import settings
+from app.services.embeddings import EMBEDDING_DIM
 from app.utils.logger import get_logger
 import uuid
 
@@ -15,19 +16,40 @@ client = QdrantClient(
     api_key=settings.QDRANT_API_KEY if settings.QDRANT_API_KEY else None
 )
 
-# Ensure collection exists
+
+
 def initialize_collection():
-    """Create collection if it doesn't exist"""
+    """Create or fix collection with correct vector size"""
     try:
-        client.get_collection(collection_name=COLLECTION_NAME)
-        logger.info(f"Collection '{COLLECTION_NAME}' already exists")
+        collection_info = client.get_collection(COLLECTION_NAME)
+        current_size = collection_info.config.params.vectors.size
+        
+        if current_size != EMBEDDING_DIM:
+            logger.warning(f"Wrong vector size detected ({current_size} ≠ {EMBEDDING_DIM}). Recreating collection...")
+            client.delete_collection(COLLECTION_NAME)
+            raise ValueError("Dimension mismatch")
+        else:
+            logger.info(f"Collection '{COLLECTION_NAME}' ready (size: {current_size})")
+            
     except Exception:
-        logger.info(f"Creating collection '{COLLECTION_NAME}'")
+        logger.info(f"Creating collection '{COLLECTION_NAME}' with vector size {EMBEDDING_DIM}")
         client.recreate_collection(
             collection_name=COLLECTION_NAME,
-            vectors_config=VectorParams(size=3072, distance=Distance.COSINE)  # text-embedding-3-large is 3072
+            vectors_config=VectorParams(size=EMBEDDING_DIM, distance=Distance.COSINE)
         )
-        logger.info(f"Collection '{COLLECTION_NAME}' created successfully")
+        logger.info(f"Collection created with size {EMBEDDING_DIM}")
+# def initialize_collection():
+#     """Create collection if it doesn't exist"""
+#     try:
+#         client.get_collection(collection_name=COLLECTION_NAME)
+#         logger.info(f"Collection '{COLLECTION_NAME}' already exists")
+#     except Exception:
+#         logger.info(f"Creating collection '{COLLECTION_NAME}'")
+#         client.recreate_collection(
+#             collection_name=COLLECTION_NAME,
+#             vectors_config=VectorParams(size=EMBEDDING_DIM, distance=Distance.COSINE)  
+#         )
+#         logger.info(f"Collection '{COLLECTION_NAME}' created successfully")
 
 # Initialize on module load
 initialize_collection()
@@ -100,40 +122,79 @@ def search_similar(
     score_threshold: float = 0.0
 ) -> List[Dict[str, Any]]:
     """
-    Search for similar vectors in Qdrant.
-    
-    Args:
-        query_vector: Query embedding vector
-        top_k: Number of results to return
-        score_threshold: Minimum similarity score (0.0 to 1.0)
-        
-    Returns:
-        List of dicts with id, score, text, and metadata
+    Search similar vectors — works with qdrant-client v1.10+ (2025)
     """
     try:
-        hits = client.search(
+        from qdrant_client.models import Filter
+
+        search_result = client.query_points(
             collection_name=COLLECTION_NAME,
-            query_vector=query_vector,
+            query=query_vector,
             limit=top_k,
-            score_threshold=score_threshold
+            with_payload=True,
+            score_threshold=score_threshold if score_threshold > 0 else None,
         )
-        
+
         results = []
-        for hit in hits:
-            result = {
-                "id": hit.id,
-                "score": hit.score,
-                "text": hit.payload.get("text") if hit.payload else None,
-                "meta": {k: v for k, v in (hit.payload or {}).items() if k != "text"}
-            }
-            results.append(result)
-        
-        logger.info(f"Found {len(results)} similar vectors")
+        for point in search_result.points:
+            payload = point.payload or {}
+            text = payload.get("text", "")
+            meta = {k: v for k, v in payload.items() if k != "text"}
+
+            results.append({
+                "id": point.id,
+                "score": point.score,
+                "text": text,
+                "meta": meta
+            })
+
+        logger.info(f"Qdrant search returned {len(results)} results")
         return results
-        
+
     except Exception as e:
-        logger.error(f"Error searching vectors in Qdrant: {str(e)}")
+        logger.error(f"Qdrant search failed: {e}", exc_info=True)
         raise
+
+# def search_similar(
+#     query_vector: List[float], 
+#     top_k: int = 4,
+#     score_threshold: float = 0.0
+# ) -> List[Dict[str, Any]]:
+#     """
+#     Search for similar vectors in Qdrant.
+    
+#     Args:
+#         query_vector: Query embedding vector
+#         top_k: Number of results to return
+#         score_threshold: Minimum similarity score (0.0 to 1.0)
+        
+#     Returns:
+#         List of dicts with id, score, text, and metadata
+#     """
+#     try:
+#         hits = client.search(
+#             collection_name=COLLECTION_NAME,
+#             query_vector=query_vector,
+#             limit=top_k,
+#             score_threshold=score_threshold
+#         )
+        
+#         results = []
+#         for hit in hits:
+#             result = {
+#                 "id": hit.id,
+#                 "score": hit.score,
+#                 "text": hit.payload.get("text") if hit.payload else None,
+#                 "meta": {k: v for k, v in (hit.payload or {}).items() if k != "text"}
+#             }
+#             results.append(result)
+        
+#         logger.info(f"Found {len(results)} similar vectors")
+#         return results
+        
+#     except Exception as e:
+#         logger.error(f"Error searching vectors in Qdrant: {str(e)}")
+#         raise
 
 def delete_by_source(source: str) -> int:
     """

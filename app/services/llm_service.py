@@ -1,95 +1,82 @@
-from typing import Dict, Any, List
-from openai import AsyncOpenAI
+# app/services/llm_service.py
+# → GROQ VERSION (FREE, FAST, NO QUOTA DRAMA)
+
+import httpx
+import json
+from typing import Dict, Any
 from app.utils.config import settings
 from app.utils.logger import get_logger
-import json
 
 logger = get_logger(__name__)
 
 class LLMService:
-    """Service for LLM operations using OpenAI API"""
+    """LLM Service using Groq (free tier, 500+ tokens/sec)"""
     
     def __init__(self):
-        self.client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
-        self.model = "gpt-4o-mini"
-    
+        print("GROQ KEY IN USE:", settings.GROQ_API_KEY)
+        self.url = "https://api.groq.com/openai/v1/chat/completions"
+        self.api_key = settings.GROQ_API_KEY  
+        self.headers = {"Authorization": f"Bearer {self.api_key}"}
+        self.model = "llama-3.1-8b-instant"  # or "mixtral-8x7b-32768"
+
     async def generate_answer(self, prompt: str, max_tokens: int = 500) -> str:
-        """
-        Generate answer using OpenAI LLM.
-        
-        Args:
-            prompt: The complete prompt with context and question
-            max_tokens: Maximum tokens in response
-            
-        Returns:
-            Generated answer text
-        """
+        payload = {
+            "model": self.model,
+            "messages": [
+                {"role":"system", "content":"Your are a helpful assistance."},
+                {"role": "user", "content": prompt}],
+            "max_tokens": max_tokens,
+            "temperature": 0.7
+        }
         try:
-            response = await self.client.chat.completions.create(
-                model=self.model,
-                messages=[{"role": "user", "content": prompt}],
-                max_tokens=max_tokens,
-                temperature=0.7
-            )
-            return response.choices[0].message.content.strip()
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                response = await client.post(self.url, json=payload, headers=self.headers)
+                response.raise_for_status()
+                return response.json()["choices"][0]["message"]["content"].strip()
         except Exception as e:
-            logger.error(f"Error generating answer: {str(e)}")
-            raise
-    
+            logger.error(f"Groq generate_answer error: {e}")
+            return "Sorry, I'm having trouble responding right now."
+
     async def detect_booking_intent(self, query: str) -> Dict[str, Any]:
-        """
-        Detect if query is related to booking an interview.
-        
-        Args:
-            query: User query text
-            
-        Returns:
-            Dict with 'is_booking' boolean and optional 'confidence' score
-        """
-        prompt = f"""Analyze if this query is about scheduling/booking an interview or appointment.
+        prompt = f"""Analyze if this query is about scheduling/booking an interview.
 
 Query: "{query}"
 
-Respond with ONLY a JSON object:
+Respond with ONLY valid JSON:
 {{
   "is_booking": true/false,
   "confidence": 0.0-1.0,
-  "reason": "brief explanation"
+  "reason": "brief reason"
 }}
 
-Examples of booking queries:
-- "I want to schedule an interview"
-- "Can I book a meeting for tomorrow at 2pm?"
-- "Schedule interview for John at john@email.com"
-- "Book me for 25th December 3pm"
-
-Examples of NON-booking queries:
-- "What is the interview process?"
-- "Tell me about your company"
-- "How do I prepare for interviews?"
+Booking examples: "schedule interview", "book meeting", "can we talk tomorrow"
+Non-booking: "what is your experience", "tell me about yourself"
 """
-        
+
+        payload = {
+            "model": "llama-3.1-8b-instant",  # Fast for intent detection
+            "messages": [{"role": "user", "content": prompt}],
+            "max_tokens": 100,
+            "temperature": 0.3
+        }
         try:
-            response = await self.client.chat.completions.create(
-                model=self.model,
-                messages=[{"role": "user", "content": prompt}],
-                max_tokens=150,
-                temperature=0.3
-            )
-            
-            result_text = response.choices[0].message.content.strip()
-            # Clean potential markdown formatting
-            result_text = result_text.replace("```json", "").replace("```", "").strip()
-            result = json.loads(result_text)
-            
-            return {
-                "is_booking": result.get("is_booking", False),
-                "confidence": result.get("confidence", 0.0),
-                "reason": result.get("reason", "")
-            }
-        except json.JSONDecodeError as e:
-            logger.warning(f"Failed to parse booking intent JSON: {str(e)}")
-            return {"is_booking": False, "confidence": 0.0, "reason": "Parse error"}
+            async with httpx.AsyncClient(timeout=15.0) as client:
+                response = await client.post(self.url, json=payload, headers=self.headers)
+                response.raise_for_status()
+                result_text = response.json()["choices"][0]["message"]["content"]
+                
+                # Clean JSON
+                result_text = result_text.strip().replace("```json", "").replace("```", "").strip()
+                result = json.loads(result_text)
+                
+                return {
+                    "is_booking": bool(result.get("is_booking", False)),
+                    "confidence": float(result.get("confidence", 0.0)),
+                    "reason": str(result.get("reason", ""))
+                }
         except Exception as e:
-            logger.error(f"Error detecting booking intent: {str(e)}")
-            return {"is_booking": False, "confidence": 0.0, "reason": str(e)}
+            logger.warning(f"Booking intent failed, using fallback: {e}")
+            # Fallback: simple keyword check
+            keywords = ["interview", "schedule", "book", "meet", "call", "talk", "hire"]
+            is_booking = any(k in query.lower() for k in keywords)
+            return {"is_booking": is_booking, "confidence": 0.9 if is_booking else 0.1, "reason": "fallback"}

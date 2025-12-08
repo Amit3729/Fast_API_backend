@@ -1,3 +1,5 @@
+import os
+os.environ["TOKENIZERS_PARALLELISM"] = "false"
 from fastapi import FastAPI
 from app.routers import upload, rag, booking
 from app.utils.logger import setup_logging

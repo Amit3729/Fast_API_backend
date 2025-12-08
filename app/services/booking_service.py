@@ -1,140 +1,118 @@
+import httpx
+import json
+import re
 from typing import Dict, Any, List, Optional
 from datetime import datetime
-from openai import AsyncOpenAI
 from app.utils.config import settings
 from app.utils.logger import get_logger
 from app.services.db import bookings_collection
 from app.schemas import BookingRecord
-import json
 from bson import ObjectId
 
 logger = get_logger(__name__)
 
 class BookingService:
-    """Service for handling interview booking logic"""
-    
     def __init__(self):
-        self.client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
-        self.model = "gpt-4o-mini"
-    
-    async def extract_booking_info(
-        self, 
-        query: str, 
-        conversation_history: List[Dict[str, str]]
-    ) -> Dict[str, Any]:
-        """
-        Extract booking information from query and conversation history using LLM.
+        self.url = "https://api.groq.com/openai/v1/chat/completions"
+        self.headers = {"Authorization": f"Bearer {settings.GROQ_API_KEY}"}
+        self.model = "llama-3.1-8b-instant"  # Fast & free
+
+    async def extract_booking_info(self, query: str, conversation_history: List[Dict[str, str]]) -> Dict[str, Any]:
+        history_text = "\n".join([f"{m['role']}: {m['text']}" for m in conversation_history[-6:]])
         
-        Args:
-            query: Current user query
-            conversation_history: Previous conversation messages
-            
-        Returns:
-            Dict with 'complete' boolean, 'data' dict, and 'missing_fields' list
-        """
-        history_text = "\n".join([
-            f"{msg['role']}: {msg['text']}" 
-            for msg in conversation_history[-10:]  # Last 5 turns
-        ])
-        
-        prompt = f"""Extract booking information from the conversation. Look for:
-- name: Full name of the person
-- email: Email address
-- date: Date in YYYY-MM-DD format
-- time: Time in HH:MM format (24-hour)
+        prompt = f"""Extract booking details from this conversation.
 
-CONVERSATION HISTORY:
-{history_text if history_text else "No previous conversation"}
+CONVERSATION:
+{history_text}
 
-CURRENT MESSAGE:
-{query}
+LATEST MESSAGE: {query}
 
-Respond with ONLY a JSON object:
+Return ONLY valid JSON:
 {{
   "complete": true/false,
-  "data": {{
-    "name": "extracted name or null",
-    "email": "extracted email or null",
-    "date": "YYYY-MM-DD or null",
-    "time": "HH:MM or null"
-  }},
-  "missing_fields": ["list", "of", "missing", "fields"]
+  "data": {{"name": "str or null", "email": "str or null", "date": "YYYY-MM-DD or null", "time": "HH:MM or null"}},
+  "missing_fields": ["name", "email", "date", "time"] filtered
 }}
 
-Important:
-- Mark complete=true ONLY if ALL four fields are present
-- Convert dates to YYYY-MM-DD (e.g., "tomorrow" → calculate date, "25th Dec" → 2025-12-25)
-- Convert times to 24-hour HH:MM (e.g., "2pm" → "14:00", "3:30pm" → "15:30")
-- Be lenient with name formats
+Rules:
+- Only complete=true if ALL 4 fields are present
+- Convert "tomorrow" → actual date
+- Convert "3pm" → "15:00"
 - Validate email format
 """
-        
+
+        payload = {
+            "model": self.model,
+            "messages": [{"role": "user", "content": prompt}],
+            "max_tokens": 200,
+            "temperature": 0.3
+        }
+
         try:
-            response = await self.client.chat.completions.create(
-                model=self.model,
-                messages=[{"role": "user", "content": prompt}],
-                max_tokens=300,
-                temperature=0.3
-            )
-            
-            result_text = response.choices[0].message.content.strip()
-            result_text = result_text.replace("```json", "").replace("```", "").strip()
-            result = json.loads(result_text)
-            
-            # Validate completeness
-            data = result.get("data", {})
-            required_fields = ["name", "email", "date", "time"]
-            missing = [f for f in required_fields if not data.get(f)]
-            
-            return {
-                "complete": len(missing) == 0,
-                "data": data,
-                "missing_fields": missing
-            }
-            
-        except json.JSONDecodeError as e:
-            logger.error(f"Failed to parse booking extraction JSON: {str(e)}")
-            return {
-                "complete": False,
-                "data": {},
-                "missing_fields": ["name", "email", "date", "time"]
-            }
+            async with httpx.AsyncClient(timeout=15.0) as client:
+                response = await client.post(self.url, json=payload, headers=self.headers)
+                response.raise_for_status()
+                text = response.json()["choices"][0]["message"]["content"]
+                text = text.replace("```json", "").replace("```", "").strip()
+                result = json.loads(text)
+
+                data = result.get("data", {})
+                missing = [f for f in ["name", "email", "date", "time"] if not data.get(f)]
+                result["complete"] = len(missing) == 0
+                result["missing_fields"] = missing
+                return result
+
         except Exception as e:
-            logger.error(f"Error extracting booking info: {str(e)}")
-            return {
-                "complete": False,
-                "data": {},
-                "missing_fields": ["name", "email", "date", "time"]
-            }
-    
+            logger.warning(f"Groq booking extraction failed: {e} → using rule-based fallback")
+            return self._rule_based_fallback(query + " " + history_text)
+
+    def _rule_based_fallback(self, text: str) -> Dict[str, Any]:
+        text = text.lower()
+        data = {"name": "", "email": "", "date": "", "time": ""}
+        missing = []
+
+        # Email
+        email = re.search(r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b', text)
+        data["email"] = email.group(0) if email else ""
+        if not data["email"]: missing.append("email")
+
+        # Name (simple)
+        if "name" in text or "i am" in text or "my name" in text:
+            name_match = re.search(r"(?:name is|my name|i am)[\s:]*([a-z\s]+)", text, re.I)
+            data["name"] = name_match.group(1).strip().title() if name_match else "User"
+        else:
+            missing.append("name")
+
+        # Date & Time (basic)
+        date_match = re.search(r'\b(\d{4}-\d{2}-\d{2}|\d{1,2}[\/\-]\d{1,2}|tomorrow|dec \d+)', text)
+        data["date"] = date_match.group(0) if date_match else ""
+        if not data["date"]: missing.append("date")
+
+        time_match = re.search(r'\b(\d{1,2}:\d{2}|\d{1,2}\s?(am|pm))\b', text)
+        data["time"] = time_match.group(0) if time_match else ""
+        if not data["time"]: missing.append("time")
+
+        return {
+            "complete": len(missing) == 0,
+            "data": data,
+            "missing_fields": missing
+        }
+
     async def save_booking(self, booking_data: Dict[str, Any], session_id: str) -> str:
-        """
-        Save booking to database.
-        
-        Args:
-            booking_data: Dict with name, email, date, time
-            session_id: Session identifier
-            
-        Returns:
-            Booking ID (MongoDB ObjectId as string)
-        """
         try:
-            booking_record = {
-                "name": booking_data["name"],
-                "email": booking_data["email"],
-                "date": booking_data["date"],
-                "time": booking_data["time"],
+            record = {
+                **booking_data,
                 "session_id": session_id,
                 "created_at": datetime.utcnow()
             }
-            
-            result = await bookings_collection.insert_one(booking_record)
-            logger.info(f"Saved booking: {result.inserted_id}")
+            result = await bookings_collection.insert_one(record)
+            logger.info(f"Booking saved: {result.inserted_id}")
             return str(result.inserted_id)
-            
         except Exception as e:
-            logger.error(f"Error saving booking: {str(e)}")
+            logger.error(f"MongoDB save failed: {e}")
             raise
+
+    # get_bookings, get_booking_by_id, delete_booking → keep your existing ones
     
     async def get_bookings(
         self, 

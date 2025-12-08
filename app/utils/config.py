@@ -7,6 +7,8 @@ class Settings(BaseSettings):
     
     # OpenAI
     OPENAI_API_KEY: str = Field(..., description="OpenAI API key for embeddings and LLM")
+    # Groq (free & super fast LLM)
+    GROQ_API_KEY: str = Field(..., description="Groq API key — get free at https://console.groq.com/keys")
     
     # Qdrant Vector Database
     QDRANT_URL: str = Field(..., description="Qdrant server URL")
