@@ -1,29 +1,33 @@
-# FastAPI Framework
-fastapi
-uvicorn[standard]
-python-multipart
+# Core Framework
+fastapi==0.115.0
+uvicorn[standard]==0.30.6
+python-multipart==0.0.9
 
-# Pydantic for data validation
-pydantic
-pydantic-settings
-email-validator
+# Data validation & settings
+pydantic==2.9.2
+pydantic-settings==2.5.2
+email-validator==2.2.0
 
-# OpenAI for embeddings and LLM
-openai
+# === EMBEDDINGS (LOCAL & FREE) ===
+sentence-transformers==3.1.1
+torch==2.4.1                   # Required for sentence-transformers
 
-# Vector Database - Qdrant
-qdrant-client
+# === LLM (GROQ - FREE & FAST) ===
+httpx==0.27.2                  # For Groq API calls
 
-# Redis for conversation memory
-redis
+# Vector Database
+qdrant-client==1.11.3
 
-# MongoDB for metadata storage
-motor
-pymongo
+# Redis (conversation memory)
+redis==5.0.8
 
-# Document processing
-PyMuPDF
-python-docx
+# MongoDB (bookings & metadata) - async
+motor==3.6.0
+pymongo==4.8.0
+
+# Document extraction
+PyMuPDF==1.24.10               # PDF text extraction
+python-docx==1.1.2             # .docx support
 
 # Utilities
-python-dotenv
+python-dotenv==1.0.1
