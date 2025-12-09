@@ -38,18 +38,7 @@ def initialize_collection():
             vectors_config=VectorParams(size=EMBEDDING_DIM, distance=Distance.COSINE)
         )
         logger.info(f"Collection created with size {EMBEDDING_DIM}")
-# def initialize_collection():
-#     """Create collection if it doesn't exist"""
-#     try:
-#         client.get_collection(collection_name=COLLECTION_NAME)
-#         logger.info(f"Collection '{COLLECTION_NAME}' already exists")
-#     except Exception:
-#         logger.info(f"Creating collection '{COLLECTION_NAME}'")
-#         client.recreate_collection(
-#             collection_name=COLLECTION_NAME,
-#             vectors_config=VectorParams(size=EMBEDDING_DIM, distance=Distance.COSINE)  
-#         )
-#         logger.info(f"Collection '{COLLECTION_NAME}' created successfully")
+
 
 # Initialize on module load
 initialize_collection()
