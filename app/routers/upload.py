@@ -45,7 +45,7 @@ def process_document(file_path: str, original_name: str, strategy: str = "fixed"
 
         # Embedding
         logger.info("[BACKGROUND] Starting embedding...")
-        embeddings = embed_texts(chunks)  # ← if this hangs, we’ll see it
+        embeddings = embed_texts(chunks)  
         logger.info(f"[BACKGROUND] Embedding done: {len(embeddings)} vectors")
 
         # Save to Qdrant

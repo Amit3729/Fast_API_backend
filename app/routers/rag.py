@@ -1,5 +1,3 @@
-# app/routers/rag.py
-
 from fastapi import APIRouter, HTTPException, BackgroundTasks
 from typing import List
 from pydantic import BaseModel
@@ -101,11 +99,6 @@ async def ask(req: AskRequest, background_tasks: BackgroundTasks = None):
                     })
 
             
-                # sources.append(SourceInfo(
-                #     source=source,
-                #     preview=text.strip()[:150] + ("..." if len(text) > 150 else "")
-                # ))
-
         # Conversation history (last 6 messages = 3 turns)
         history_msgs = get_messages(session_id)[-6:]
         history_text = "\n".join([f"{m['role'].title()}: {m['text']}" for m in history_msgs]) if history_msgs else "None"
