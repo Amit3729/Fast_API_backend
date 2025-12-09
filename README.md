@@ -1,8 +1,6 @@
 # Private RAG + Interview Booking Assistant
 
-A **fully private**, **zero-cost**, **production-grade** RAG system with interview scheduling — built from scratch with FastAPI.
-
-**No OpenAI. No data leaves your machine. Works forever for free.**
+A  RAG system with interview scheduling — built from scratch with FastAPI.
 
 ## Features
 
