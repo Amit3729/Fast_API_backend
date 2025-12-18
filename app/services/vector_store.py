@@ -156,8 +156,7 @@ def delete_by_source(source: str) -> int:
         Number of deleted points
     """
     try:
-        # Qdrant doesn't support direct filtering delete in all versions
-        # So we search and then delete by IDs
+        # we search and then delete by IDs
         from qdrant_client.http.models import Filter, FieldCondition, MatchValue
         
         # Search for all points with this source

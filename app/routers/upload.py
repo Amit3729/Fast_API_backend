@@ -1,5 +1,3 @@
-# app/routers/upload.py
-
 import os
 import tempfile
 import asyncio

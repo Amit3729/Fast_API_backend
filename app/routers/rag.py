@@ -83,7 +83,7 @@ async def ask(req: AskRequest, background_tasks: BackgroundTasks = None):
 
         # === REGULAR RAG FLOW ===
         query_vector = embed_texts([query])[0]
-        hits = search_similar(query_vector, top_k=5)  # 5 is usually better than 4
+        hits = search_similar(query_vector, top_k=5)  
 
         contexts = []
         sources = []
@@ -122,7 +122,7 @@ INSTRUCTIONS:
 - If no relevant info, say: "I don't have enough information from the uploaded documents to answer that."
 - Be friendly and professional"""
 
-        # Optional: Add timeout protection
+        #Add timeout protection
         try:
             answer = await asyncio.wait_for(llm_service.generate_answer(prompt), timeout=30.0)
         except asyncio.TimeoutError:
